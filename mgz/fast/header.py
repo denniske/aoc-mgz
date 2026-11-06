@@ -170,8 +170,46 @@ def parse_player(header, player_number, num_players, save):
     ), device
 
 
+# Bytes between the lobby seed and the end of the header, constant on 68.x.
+LOBBY_TAIL_68 = 24
+
+
+def find_lobby_68(data):
+    """Position of the lobby block in a save >= 68 header, found from the end.
+
+    68.9 inserts an unparsed, unprefixed block (~395 KB, "Scenario Triggers" plus
+    compiled XS) between the trigger list and the lobby, so the lobby cannot be
+    reached by walking forward. It is the last thing in the header, though, so walk
+    back from the end and accept the first position whose chat messages end exactly
+    LOBBY_TAIL_68 bytes before it.
+    """
+    buf = data.getvalue()
+    end = len(buf) - LOBBY_TAIL_68 - 4
+    # 52 bytes of padding precede reveal_map_id; 28 bytes from it to the chat count.
+    for reveal in range(end - 32, max(52, end - 1_000_000), -1):
+        reveal_map_id, map_size = struct.unpack_from('<I4xI', buf, reveal)
+        if reveal_map_id > 3 or not 0 < map_size <= 512:
+            continue
+        pos = reveal + 28
+        num_chat = struct.unpack_from('<I', buf, pos)[0]
+        pos += 4
+        if num_chat > 10000:
+            continue
+        for _ in range(num_chat):
+            if pos + 4 > end:
+                break
+            pos += 4 + struct.unpack_from('<I', buf, pos)[0]
+        if pos == end:
+            return reveal - 52
+    return None
+
+
 def parse_lobby(data, version, save):
     """Parse lobby data."""
+    if version is Version.DE and save >= 68:
+        start = find_lobby_68(data)
+        if start is not None:
+            data.seek(start)
     if version is Version.DE:
         data.read(5)
         if save >= 20.06:
@@ -310,7 +348,15 @@ def parse_scenario(data, num_players, version, save):
     map_id, difficulty_id = unpack('<II', data)
     remainder = data.read()
     if version is Version.DE:
-        if save >= 66.3:
+        # The trigger version belongs to the scenario format, not the save version
+        # (matches the game's own default scenarios: 1.57 -> 4.7, 1.58 -> 4.9, 1.59 -> 5.0).
+        if scenario_version >= 1.585:
+            settings_version = 5.0
+        elif scenario_version >= 1.575:
+            settings_version = 4.9
+        elif scenario_version >= 1.565:
+            settings_version = 4.7
+        elif save >= 66.3:
             settings_version = 4.5
         elif save >= 64.3:
             settings_version = 4.1
