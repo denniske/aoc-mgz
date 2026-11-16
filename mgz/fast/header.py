@@ -291,6 +291,44 @@ def parse_map(data, version, save):
     )
 
 
+def skip_triggers(data, n_triggers, scenario_version):
+    """Skip the trigger list of a scenario >= 1.54.
+
+    Effects and conditions are not fixed-size here: each starts with its type and
+    the number of 4-byte attributes that follow (83 effect / 34 condition attributes
+    on 1.59). Effects then carry message and sound strings, a list of selected
+    object ids sized by the number_of_units_selected attribute, and two option
+    strings; conditions carry an xs_function string. 1.55 adds execute_on_load to
+    the trigger header. Layout per AoE2ScenarioParser's versions/DE/v1.5x.
+
+    Random-map games have no triggers, so only lobbies played on a custom
+    .aoe2scenario exercise this.
+    """
+    header_size = 27 if scenario_version >= 1.545 else 26
+    for _ in range(n_triggers):
+        data.read(header_size)
+        int_prefixed_string(data)  # description
+        int_prefixed_string(data)  # name
+        int_prefixed_string(data)  # short description
+        n_effects = unpack('<i', data)
+        for _ in range(n_effects):
+            _effect_type, n_attributes = unpack('<ii', data)
+            attributes = unpack(f'<{n_attributes}i', data, shorten=False)
+            int_prefixed_string(data)  # message
+            int_prefixed_string(data)  # sound name
+            data.read(max(attributes[4], 0) * 4)  # selected object ids
+            int_prefixed_string(data)  # message option 1
+            int_prefixed_string(data)  # message option 2
+        data.read(n_effects * 4)  # effect display order
+        n_conditions = unpack('<i', data)
+        for _ in range(n_conditions):
+            _condition_type, n_attributes = unpack('<ii', data)
+            data.read(n_attributes * 4)
+            int_prefixed_string(data)  # xs function
+        data.read(n_conditions * 4)  # condition display order
+    data.read(n_triggers * 4)  # trigger display order
+
+
 def parse_scenario(data, num_players, version, save):
     """Parse scenario section."""
     scenario_version = unpack('<f', data)
@@ -317,12 +355,18 @@ def parse_scenario(data, num_players, version, save):
             data.read(4)
     data.read(5)
     elapsed_time = unpack('<f', data)
-    scenario_filename = aoc_string(data)
-    if version is Version.DE:
-        data.read(64)
     if save >= 66.6:
-        data.read(68)
-    data.read(20)
+        # The filename sits after 128 bytes, not before them. Random-map games
+        # write an empty filename, where either order gives the same offset; a
+        # lobby played on a custom .aoe2scenario does not.
+        data.read(128)
+        scenario_filename = aoc_string(data)
+        data.read(24)
+    else:
+        scenario_filename = aoc_string(data)
+        if version is Version.DE:
+            data.read(64)
+        data.read(20)
     instructions = aoc_string(data)
     for _ in range(0, 9):
         aoc_string(data)
@@ -386,6 +430,10 @@ def parse_scenario(data, num_players, version, save):
     if version is Version.DE:
         data.read(1)
         n_triggers = unpack("<I", data)
+
+        if scenario_version >= 1.535:
+            skip_triggers(data, n_triggers, scenario_version)
+            n_triggers = 0
 
         for _ in range(n_triggers):
             data.read(22)

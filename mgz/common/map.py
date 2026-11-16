@@ -183,12 +183,21 @@ def get_mod_id(strings):
             return s[3].split('_')[0]
 
 
-def get_map_data(map_id, instructions, dimension, version, dataset_id, reference, tiles, de_seed=None, de_strings=[]):
+def get_map_data(map_id, instructions, dimension, version, dataset_id, reference, tiles, de_seed=None, de_strings=[], de_rms_filename=None):
     """Get the map metadata."""
     if instructions == b'\x00':
         raise ValueError('empty instructions')
-    
-    encoding, language, name = extract_from_instructions(instructions)
+
+    try:
+        encoding, language, name = extract_from_instructions(instructions)
+    except ValueError:
+        # A map script that loads an .aoe2scenario (e.g. GXPL_MegaRandom.rms2)
+        # leaves the scenario's own instructions in the header, with no map line.
+        # DE names the script in its lobby settings, and DE text is UTF-8.
+        if version != Version.DE or not de_rms_filename:
+            raise
+        encoding, language = 'utf-8', 'unknown'
+        name = re.sub(r'\.rms2?$', '', de_rms_filename)
     if dataset_id == 100:
         encoding = "utf-8"
     name, custom = lookup_name(map_id, name, version, reference)

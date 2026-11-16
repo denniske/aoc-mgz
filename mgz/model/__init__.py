@@ -117,7 +117,8 @@ def parse_match(handle):
             dataset_id,
             dataset,
             data['map']['tiles'],
-            de_seed=data['lobby']['seed']
+            de_seed=data['lobby']['seed'],
+            de_rms_filename=data['de']['rms_filename'] if data['de'] else None
         )
     except ValueError as e:
         raise RuntimeError(f"could not get map data: {e}")

@@ -362,6 +362,10 @@ def operation(data):
             return op_type, chat(data)
         if op_type == Operation.POSTGAME:
             return op_type, postgame(data)
+        if op_type == Operation.START:
+            # DE scenario games with triggers write op 5 mid-body with 8 bytes:
+            # (-1 or 0, trigger id), apparently logged as triggers fire.
+            return op_type, struct.unpack('<ii', data.read(8))
     except struct.error:
         raise EOFError
     raise RuntimeError("unknown data received")
